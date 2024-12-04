@@ -4,206 +4,254 @@
 #include <iostream>
 #include <string.h>
 
-typedef unsigned int uint32;
+class Picture;
 
-class Picture
+void pad(std::ostream& os,int x,int y)
 {
- public:
-    Picture():
+    for(int i = x; i < y; ++i)
+        os << ' ';
+}
+class P_Node
+{
+    friend class Picture;
+ protected:
+    int width_;
+    int height_;
+    int useCount_;
+
+    P_Node():
      width_(0),
      height_(0),
-     data_(nullptr)
+     useCount_(1)
     {}
 
-    Picture(uint32 w,uint32 h)
+    virtual ~P_Node() = default;
+ public:
+    int width() const { return width_; }
+    int height() const { return height_; }
+    virtual void display(std::ostream& os,int row,int wd) = 0;
+};
+
+class StringPic : public P_Node
+{
+ private:
+    char** data_;
+    int* datalen_;
+    int size_;
+ public:
+    StringPic(const char* const* str,int len)
+     :data_(nullptr),
+     size_(len)
     {
-        init(w,h);
+        data_ = new char*[len];
+        datalen_ = new int[len];
+        width_ = 0;
+        height_ = len;
+
+        for(int i = 0; i < len; ++i)
+        {
+            int ilen = strlen(str[i]);
+            datalen_[i] = ilen;
+            data_[i] = new char[ilen + 1];
+            strcpy(data_[i],str[i]);
+            width_ = width_ > ilen ? width_ : ilen;
+        }
     }
+
+    void display(std::ostream& os,int row,int wd) override
+    {
+        if(row >= 0 && row < height_)
+        {
+            os << data_[row];
+            pad(os,datalen_[row],wd);
+        }else{
+            pad(os,0,wd);
+        }
+    }
+
+    ~StringPic()
+    {
+        for(int i = 0; i < height_; ++i)
+        {
+            delete[] data_[i];
+        }
+        delete [] data_;
+    }
+};
+class Picture
+{
+    friend std::ostream& operator<<(std::ostream& os,const Picture& pic);
+    friend Picture frame(const Picture& pic);
+    friend Picture operator &(const Picture& t,const Picture& b);
+    friend Picture operator |(const Picture& l,const Picture& r);
+ public:
+    Picture(const char* const* str,int len):
+     p(new StringPic(str,len))
+    {
+    }
+
+    Picture(const Picture& pic):
+     p(pic.p)
+    {
+        ++(p->useCount_);
+    }
+
+    Picture& operator=(const Picture& pic)
+    {
+        if(this != &pic)
+        {
+            ++(pic.p->useCount_);
+            if(--(p->useCount_) == 0)
+            {
+                delete p;
+            }
+            p = pic.p;
+        }
+        return *this;
+    }
+    
+    Picture():p(nullptr){}
 
     ~Picture()
     {
-        delete [] data_;
+        if(--(p->useCount_) == 0) delete p;
     }
 
-    Picture(const char* const* pic,uint32 len)
-    {
-        uint32 maxWidth = 0;
-        for(int i = 0; i < len; ++i)
-        {
-            maxWidth = max(maxWidth,strlen(pic[i]));
-        }
-
-        init(maxWidth,len);
-
-        for(int row = 0; row < height_; ++row)
-        {
-            const char* src = pic[row];
-            int col = 0;
-            while(col < width_ ||  *src)
-            {
-                if(*src)
-                    position(row,col) = *src++;
-                // else
-                //     position(row,col) = ' ';
-                ++col;
-            }
-        }
+    int width() const { return p->width(); }
+    int height() const { return p->height(); }
+    void display(std::ostream& os,int row,int wd) const
+    { 
+        p->display(os,row,wd); 
     }
-
-    Picture(const Picture& other):
-     width_(other.width_),
-     height_(other.height_),
-     data_(new char[width_ * height_])
-    {
-        copy(0,0,other);
-    }
-
-    Picture& operator=(const Picture& other)
-    {
-        if(this != &other)
-        {
-            delete [] data_;
-            init(other.width_,other.height_);
-            copy(0,0,other);
-        }
-        return *this;
-    }
-
-    Picture& operator=(Picture&& other)
-    {
-        if(this != &other)
-        {
-            if(data_)
-                delete [] data_;
-            width_ = other.width_;
-            height_ = other.height_;
-            data_ = other.data_;
-            other.data_ = nullptr;
-            other.width_ = 0;
-            other.height_ = 0;
-        }
-        return *this;
-    }
-
-    Picture(Picture&& other)
-    {
-        width_ = other.width_;
-        height_ = other.height_;
-        data_ = other.data_;
-        other.data_ = nullptr;
-        other.width_ = 0;
-        other.height_ = 0;
-    }
-
-    uint32 width() const { return width_;}
-    uint32 height() const { return height_;}
-    Picture frame() const
-    {
-        Picture ret(width_ + 2,height_ + 2);
-        ret.copy(1,1,*this);
-        int retw = ret.width();
-        int reth = ret.height();
-        for(int i = 1; i < retw - 1; ++i)
-        {
-            ret.position(0,i) = '-';
-            ret.position(reth-1,i) = '-';
-        }
-
-        for(int i = 1; i < reth - 1; ++i)
-        {
-            ret.position(i,0) = '|';
-            ret.position(i,retw-1) = '|';
-        }
-        ret.position(0,0) = '+';
-        ret.position(0,retw-1) = '+';
-        ret.position(reth-1,0) = '+';
-        ret.position(reth-1,retw-1) = '+';
-        return ret;
-    }
-
-    char& position(uint32 r,uint32 c)
-    {
-        return data_[r * width_ + c];
-    }
-    char position(uint32 r,uint32 c) const
-    {
-        return data_[r * width_ + c];
-    }
-
-    void copy(uint32 x,uint32 y,const Picture& other)
-    {
-        int w = other.width();
-        int h = other.height();
-
-        for(int row = 0; row < h; ++row)
-        {
-            for(int col = 0; col < w; ++col)
-            {
-                position(x + row,y + col) = other.position(row,col);
-            }
-        }
-    }
-
- protected:
-    uint32 max(uint32 x,uint32 y)
-    {
-        return x > y ? x : y;
-    }
-
-    void init(uint32 w,uint32 h)
-    {
-        width_ = w;
-        height_ = h;
-        data_ = new char[w * h];
-        memset(data_,' ',w*h);
-    }
+    
  private:
-    uint32 width_;
-    uint32 height_;
-    char* data_;
+    Picture(P_Node* other):p(other){}
+
+ private:
+    P_Node* p;
 };
 
+class FramePic : public P_Node
+{
+ private:
+    Picture pic_;
+ public:
+    FramePic(const Picture& pic):
+     pic_(pic)
+    {
+        width_ = pic.width() + 2;
+        height_ = pic.height() + 2;
+    }
+
+    void display(std::ostream& os,int row,int wd) override
+    {
+        //top or bottom
+        if(row == 0 || row == height_ - 1)
+        {
+            os << '+';
+            for(int i = 1; i < width_; ++i)
+            {
+                os << '-';
+            }
+            os << '+';
+        }
+        else if(row > 0 && row < height_)
+        {
+            os << '|';
+            pic_.display(os,row - 1,wd - 1);
+            os << '|';
+        }else{
+            pad(os,0,wd);
+        }
+    }
+};
+
+class VCatPic : public P_Node
+{
+ private:
+    Picture top_;
+    Picture bottom_;
+ public:
+    VCatPic(const Picture& top,const Picture& bottom):
+     top_(top),
+     bottom_(bottom)
+    {
+        width_ = top_.width() > bottom.width() ? top.width() : bottom.width();
+        height_ = top_.height() + bottom.height();
+    }
+
+    void display(std::ostream& os,int row,int wd) override
+    {
+        if(row >= 0 && row < top_.height())
+        {
+            top_.display(os,row,wd);
+        }
+        else if(row >= top_.height() && row < height_)
+        {
+            //don't forget row is a gobal val of two cat picture,
+            //it may greater than its height.
+            bottom_.display(os,row - top_.height(),wd);
+        }else{
+            pad(os,0,wd);
+        }
+    }
+};
+
+class HCatPic : public P_Node
+{
+ private:
+    Picture left_;
+    Picture right_;
+ public:
+    HCatPic(const Picture& l,const Picture& r):
+     left_(l),
+     right_(r)
+    {
+        width_ = l.width() + r.width();
+        height_ = l.height() > r.height() ? l.height() : r.height();
+    }
+
+    void display(std::ostream& os,int row,int wd) override
+    {
+        if(row >= 0 && row < height_)
+        {
+            left_.display(os,row,left_.width());
+            right_.display(os,row,right_.width());
+        }else{
+            pad(os,0,wd);
+        }
+    }
+};
+
+/*
+*   the type of const object can only call the const method!
+*/
 std::ostream& operator<<(std::ostream& os,const Picture& pic)
 {
-    int w = pic.width();
-    int h = pic.height();
-
-    for(int i = 0; i < h; ++i)
+    int height = pic.height();
+    int width  = pic.width();
+    for(int i = 0; i < height; ++i)
     {
-        for(int j = 0; j < w; ++j)
-        {
-            os << pic.position(i,j);
-        }
+        pic.display(os,i,width);
         os << '\n';
     }
     return os;
 }
 
-Picture frame(const Picture& p)
+Picture frame(const Picture& pic)
 {
-    return p.frame();
+    return new FramePic(pic);
 }
 
-Picture operator&(const Picture& left,const Picture& right)
+Picture operator &(const Picture& t,const Picture& b)
 {
-    int height = left.height() + right.height();
-    int width = left.width() > right.width() ? left.width() : right.width();
-
-    Picture ret(width,height);
-    ret.copy(0,0,left);
-    ret.copy(left.height(),0,right);
-    return ret;
+    return new VCatPic(t,b);
 }
 
-Picture operator|(const Picture& left,const Picture& right)
+Picture operator |(const Picture& l,const Picture& r)
 {
-    int width = left.width() + right.width();
-    int height = left.height() > right.height() ? left.height() : right.height();
-
-    Picture ret(width,height);
-    ret.copy(0,0,left);
-    ret.copy(0,left.width(),right);
-    return ret;
+    return new HCatPic(l,r);
 }
+
 
 #endif//!XIN_PICTURE_H
