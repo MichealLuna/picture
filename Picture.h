@@ -76,6 +76,7 @@ class StringPic : public P_Node
             delete[] data_[i];
         }
         delete [] data_;
+        delete [] datalen_;
     }
 };
 class Picture
